@@ -30,7 +30,7 @@ _core = None  # Will store a reference to the AutocompleteCore instance
 def start_linux_hooks(core):
     """
     Entry point: register AT-SPI event listeners and begin listening.
-    This function should be called once from main.py after the core is initialized.
+    Runs the AT-SPI event loop in a background thread to avoid blocking the Qt event loop.
     """
     global _core
     _core = core
@@ -49,9 +49,16 @@ def start_linux_hooks(core):
         "object:text-changed:delete"
     )
 
-    # Launch the AT-SPI event loop. This call is blocking, so if your application
-    # requires concurrency, you might want to run this in a background thread.
-    pyatspi.Registry.start()
+    # Start AT-SPI event loop in a background thread
+    def run_at_spi_loop():
+        try:
+            pyatspi.Registry.start()
+        except Exception as e:
+            print(f"Error in AT-SPI event loop: {e}")
+
+    # Create and start the thread
+    at_spi_thread = threading.Thread(target=run_at_spi_loop, daemon=True)
+    at_spi_thread.start()
 
 
 def on_focus_changed(event):
@@ -59,29 +66,28 @@ def on_focus_changed(event):
     Callback for focus changes. We check if the new focus is an editable text
     field and, if so, notify the core system.
     """
-    # event.detail1 == 1 => gained focus
-    if event.detail1 == 1:
-        source = event.source
-        role_name = source.getRoleName().lower()
+    try:
+        # Check if this is focus gained or lost
+        is_focus_gained = (event.detail1 == 1)
 
-        # Exclude password fields or non-editable text
-        if "password" in role_name or not is_editable_text(source):
-            # Hide any existing overlay, focus is invalid for suggestions
-            _core.on_focus_changed(None)  # or pass a special event, or just hide overlay
-            return
+        if is_focus_gained:
+            # If the newly focused object is an editable text role
+            role_name = event.source.getRoleName().lower() if event.source else ""
+            if "edit" in role_name or "text" in role_name:
+                # Pass the raw event to core
+                _core.on_focus_event(event)
+            else:
+                # Not a text field => hide overlay
+                _core.on_focus_event(event)
 
-        # This is a valid text field => pass to the core
-        info = {
-            "role": source.getRoleName(),
-            "name": source.name,
-            "full_text": get_all_text_safe(source)
-        }
+        else:
+            # If losing focus from this object
+            if _core.current_focus == event.source:
+                # The object losing focus is the one we're tracking
+                _core.on_focus_event(event)
 
-        _core.on_focus_changed(info)
-    else:
-        # Focus lost
-        # Optionally tell core to hide suggestions or reset state
-        _core.on_focus_changed(None)
+    except Exception as e:
+        print(f"Error in focus change handler: {e}")
 
 
 def on_text_changed(event):
@@ -89,26 +95,14 @@ def on_text_changed(event):
     Callback for text insertions or deletions. We only handle events from the
     currently focused text field. Then, we update the core with the new text.
     """
-    # If there's no core or no source, do nothing
-    if not _core or not event.source:
-        return
+    try:
+        # If we have a focus object and this event's source is that same object
+        if _core.current_focus is not None and event.source == _core.current_focus:
+            # Pass the raw event to core
+            _core.on_text_changed_event(event)
 
-    source = event.source
-    if not is_editable_text(source):
-        return
-
-    # We fetch the entire text from the field:
-    new_text = get_all_text_safe(source)
-
-    # Prepare an info dict. You could pass the raw event object if you prefer.
-    info = {
-        "role": source.getRoleName(),
-        "name": source.name,
-        "new_text": new_text
-        # ... other info if needed
-    }
-
-    _core.on_text_changed(info)
+    except Exception as e:
+        print(f"Error in text change handler: {e}")
 
 
 def is_editable_text(accessible_obj) -> bool:
@@ -217,23 +211,3 @@ def direct_set_text_contents(accessible_obj, new_text: str) -> bool:
     except:
         # Could be NotImplementedError or the object blocking changes
         return False
-
-
-# ------------------------------------------------------------------------------
-# Example helper that your AutocompleteCore might call:
-# ------------------------------------------------------------------------------
-
-def insert_suggestion(accessible_obj, base_text: str, suggestion: str):
-    """
-    Attempt to insert `suggestion` into the text field represented by `accessible_obj`.
-    This merges or simply replaces text depending on your design.
-    
-    `base_text` is the text currently in the field, so you can do merges if needed.
-    """
-    # Example logic: if suggestion starts with base_text, or do some fancy logic.
-    new_text = suggestion  # or: base_text + suggestion, etc.
-
-    ok = direct_set_text_contents(accessible_obj, new_text)
-    if not ok:
-        # Fallback
-        fallback_insert_text(new_text)

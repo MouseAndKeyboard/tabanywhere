@@ -26,7 +26,7 @@ def main():
 
     logger.info("Initializing LLM client, overlay, and core logic...")
     llm_client = LLMClient()
-    overlay = Overlay()
+    overlay = Overlay(on_accept=core.accept_suggestion)
     core = AutocompleteCore(llm_client, overlay)
 
     logger.info("Starting Linux accessibility hooks...")
