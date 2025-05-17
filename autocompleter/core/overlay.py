@@ -104,6 +104,10 @@ class Overlay:
         self.window = OverlayWindow(on_accept=on_accept)
         self.window.hide()  # hidden by default
 
+    def set_on_accept(self, callback):
+        """Update the callback invoked when the user accepts a suggestion."""
+        self.window.on_accept = callback
+
     def show_suggestion(self, text, x=0, y=0):
         """Show an autocomplete suggestion near the given screen coords."""
         self.window.show_suggestion(text, x, y)

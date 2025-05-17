@@ -28,6 +28,8 @@ def main():
     llm_client = LLMClient()
     overlay = Overlay()
     core = AutocompleteCore(llm_client, overlay)
+    # Connect the overlay's accept callback to the core
+    overlay.set_on_accept(core.accept_suggestion)
 
     logger.info("Starting Linux accessibility hooks...")
     start_linux_hooks(core)
@@ -41,9 +43,8 @@ def main():
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    logger.info("Launching the AT-SPI registry event loop. Press Ctrl+C to exit.")
-    # This call blocks and processes accessibility events indefinitely
-    pyatspi.Registry.start()
+    logger.info("Entering main event loop. Press Ctrl+C to exit.")
+    overlay.exec_()
 
 
 if __name__ == "__main__":
